@@ -1,0 +1,110 @@
+name: Platform Master - IaC
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        description: TF workspace
+      working-dir:
+        type: string
+        required: true
+        description: tf manifests directory
+      plan:
+        type: boolean
+        required: false
+        default: false
+        description: Execute terraform plan
+      create:
+        type: boolean
+        required: false
+        default: false
+        description: Create AWS Resources
+      destroy:
+        type: boolean
+        required: false
+        default: false
+        description: Destroy AWS Resources
+
+# https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#adding-permissions-settings
+permissions:
+  id-token: write # This is required for requesting the JWT from GitHub's OIDC provider
+  contents: read  # This is required for actions/checkout
+
+jobs:
+  plan:
+    if: inputs.plan || inputs.create
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-dir }}
+    steps:
+      -
+        uses: actions/checkout@v3
+      - 
+        # https://github.com/aws-actions/configure-aws-credentials
+        name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::200290038370:role/gh-actions-role
+          aws-region: eu-north-1
+      - 
+        name: terraform plan
+        run: terraform init && terraform validate && terraform workspace select -or-create ${{ inputs.environment }} && terraform plan -out tf-plan
+      -
+        name: Upload Plan Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: tf-plan
+          path: tf-plan
+
+  create:
+    if: inputs.create
+    needs: [plan]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-dir }}
+    steps:
+      -
+        uses: actions/checkout@v3
+      - 
+        # https://github.com/aws-actions/configure-aws-credentials
+        name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::200290038370:role/gh-actions-role
+          aws-region: eu-north-1
+      - 
+        name: Download tf-plan Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: tf-plan
+      -
+        name: terraform apply
+        run: terraform init && terraform workspace select -or-create ${{ inputs.environment }} && terraform apply tf-plan --auto-approve
+  destroy:
+    if: inputs.destroy
+    needs: [plan]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-dir }}
+    steps:
+      -
+        uses: actions/checkout@v3
+      - 
+        # https://github.com/aws-actions/configure-aws-credentials
+        name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::200290038370:role/gh-actions-role
+          aws-region: eu-north-1
+      - 
+        name: Download tf-plan Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: tf-plan
+      -
+        name: terraform destroy
+        run: terraform init && terraform workspace select -or-create ${{ inputs.environment }} && terraform destroy tf-plan --auto-approve
