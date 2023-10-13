@@ -1,0 +1,106 @@
+name: infra-as-code
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        description: TF workspace
+      plan:
+        type: boolean
+        required: false
+        default: false
+        description: Execute terraform plan
+      create:
+        type: boolean
+        required: false
+        default: false
+        description: Create AWS Resources
+      destroy:
+        type: boolean
+        required: false
+        default: false
+        description: Destroy AWS Resources
+
+jobs:
+  plan:
+    env:
+      DESTROY: ${{ inputs.destroy }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ephemeral-resources/
+    steps:
+      -
+        uses: actions/checkout@v3
+      - 
+        # https://github.com/aws-actions/configure-aws-credentials
+        name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::200290038370:role/gh-actions-role
+          aws-region: eu-north-1
+      - 
+        name: terraform plan
+        run: |
+          terraform init && terraform validate && terraform workspace select -or-create dev  && \
+          [[ "$DESTROY" == "true" ]] && terraform plan -destroy -out tf-plan || terraform plan -out tf-plan
+      -
+        name: Upload Plan Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: tf-plan
+          path: ephemeral-resources/tf-plan
+
+  create:
+    if: inputs.create
+    needs: [plan]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ephemeral-resources/
+    steps:
+      -
+        uses: actions/checkout@v3
+      - 
+        # https://github.com/aws-actions/configure-aws-credentials
+        name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::200290038370:role/gh-actions-role
+          aws-region: eu-north-1
+      - 
+        name: Download tf-plan Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: tf-plan
+          path: ephemeral-resources/
+      -
+        name: terraform apply
+        run: terraform init && terraform workspace select -or-create dev && terraform apply tf-plan
+  destroy:
+    if: inputs.destroy
+    needs: [plan]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ephemeral-resources/
+    steps:
+      -
+        uses: actions/checkout@v3
+      - 
+        # https://github.com/aws-actions/configure-aws-credentials
+        name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::200290038370:role/gh-actions-role
+          aws-region: eu-north-1
+      - 
+        name: Download tf-plan Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: tf-plan
+          path: ephemeral-resources/
+      -
+        name: terraform destroy
+        run: terraform init && terraform workspace select -or-create dev && terraform apply tf-plan
